@@ -89,7 +89,7 @@ def test(func):
             y = 0
             self.stochastic_inference = False
             for i in six.moves.range(30):
-                y += func(self, x, **kwargs)
+                y += F.softmax(func(self, x, **kwargs))
             self.stochastic_inference = True
             return y
         else:
