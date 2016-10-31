@@ -57,7 +57,7 @@ if __name__ == '__main__':
     print('generating model')
     model = swapout.Swapout(10, block_num=3, out_channels=(16 * k, 32 * k, 64 * k), N=(int(N / 3.), int(N / 3.), int(N / 3.)), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True)
     print('Done')
-    optimizer = nutszebra_optimizer.OptimizerWideRes(model, lr=lr)
+    optimizer = nutszebra_optimizer.OptimizerSwapout(model, lr=lr)
     args['model'] = model
     args['optimizer'] = optimizer
     args['da'] = nutszebra_data_augmentation.DataAugmentationCifar10NormalizeSmall
