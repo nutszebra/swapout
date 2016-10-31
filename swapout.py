@@ -30,10 +30,10 @@ class BN_ReLU_Conv(nutszebra_chainer.Model):
 
 class ResBlockWithSwapout(nutszebra_chainer.Model):
 
-    def __init__(self, in_channel, out_channel, theta1, theta2, n=38):
+    def __init__(self, in_channel, out_channel, theta1, theta2, n=38, stride_at_first_layer=2):
         super(ResBlockWithSwapout, self).__init__()
         modules = []
-        modules += [('bn_relu_conv1_1', BN_ReLU_Conv(in_channel, out_channel))]
+        modules += [('bn_relu_conv1_1', BN_ReLU_Conv(in_channel, out_channel, 3, stride_at_first_layer, 1))]
         modules += [('bn_relu_conv2_1', BN_ReLU_Conv(out_channel, out_channel))]
         for i in six.moves.range(2, n + 1):
             modules.append(('bn_relu_conv1_{}'.format(i), BN_ReLU_Conv(out_channel, out_channel)))
@@ -41,9 +41,12 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
         # register layers
         [self.add_link(*link) for link in modules]
         self.modules = modules
+        self.in_channel = in_channel
+        self.out_channel = out_channel
         self.n = n
         self.theta1 = theta1
         self.theta2 = theta2
+        self.stride_at_first_layer = stride_at_first_layer
 
     def weight_initialization(self):
         for i in six.moves.range(1, self.n + 1):
@@ -54,10 +57,17 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
     def concatenate_zero_pad(x, h_shape, volatile, h_type):
         _, x_channel, _, _ = x.data.shape
         batch, h_channel, h_y, h_x = h_shape
+        if x_channel == h_channel:
+            return x
         pad = chainer.Variable(np.zeros((batch, h_channel - x_channel, h_y, h_x), dtype=np.float32), volatile=volatile)
         if h_type is not np.ndarray:
             pad.to_gpu()
         return F.concat((x, pad))
+
+    def maybe_pooling(self, x):
+        if self.stride_at_first_layer == 2:
+            return F.average_pooling_2d(x, 3, 2, 1)
+        return x
 
     @staticmethod
     def _swapout(x, h, theta1, theta2, train=True):
@@ -66,7 +76,7 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
     def __call__(self, x, train=False, train_dropout=True):
         h = self['bn_relu_conv1_1'](x, train=train)
         h = self['bn_relu_conv2_1'](h, train=train)
-        x = ResBlockWithSwapout._swapout(ResBlockWithSwapout.concatenate_zero_pad(x, h.data.shape, h.volatile, type(h.data)), h, self.theta1[0], self.theta2[0], train=train_dropout)
+        x = ResBlockWithSwapout._swapout(ResBlockWithSwapout.concatenate_zero_pad(self.maybe_pooling(x), h.data.shape, h.volatile, type(h.data)), h, self.theta1[0], self.theta2[0], train=train_dropout)
         for i in six.moves.range(2, self.n + 1):
             h = self['bn_relu_conv1_{}'.format(i)](x, train=train)
             h = self['bn_relu_conv2_{}'.format(i)](h, train=train)
@@ -85,14 +95,22 @@ def test(func):
 
     @wraps(func)
     def wrapper(self, x, *args, **kwargs):
-        if (self.stochastic_inference is True) and (x.volatile == 'ON' or x.volatile is True):
-            y = 0
-            self.stochastic_inference = False
-            for i in six.moves.range(30):
-                y += F.softmax(func(self, x, **kwargs))
-            self.stochastic_inference = True
-            return y
+        if (x.volatile == 'ON' or x.volatile is True):
+            if self.stochastic_inference is True:
+                # stochastic_inference
+                y = 0
+                self.stochastic_inference = False
+                kwargs['train_dropout'] = True
+                for i in six.moves.range(30):
+                    y += F.softmax(func(self, x, **kwargs))
+                self.stochastic_inference = True
+                return y
+            else:
+                # deterministic inference
+                kwargs['train_dropout'] = False
+                return func(self, x, **kwargs)
         else:
+            # training
             return func(self, x, **kwargs)
     return wrapper
 
@@ -102,13 +120,15 @@ class Swapout(nutszebra_chainer.Model):
     def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(10, 10, 10), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True):
         super(Swapout, self).__init__()
         # conv
-        modules = [('conv1', L.Convolution2D(3, 16, 7, 2, 3))]
-        in_channel = 16
-        for i, out_channel, n, theta1, theta2 in six.moves.zip(six.moves.range(1, block_num + 1), out_channels, N, Swapout.linear_schedule(Theta1[0], Theta1[1], N), Swapout.linear_schedule(Theta2[0], Theta2[1], N)):
-            modules.append(('res_block_with_swapout{}'.format(i), ResBlockWithSwapout(in_channel, out_channel, theta1, theta2, n=n)))
+        modules = [('conv1', L.Convolution2D(3, out_channels[0], 7, 2, 3))]
+        in_channel = out_channels[0]
+        strides = [1] + [2] * (block_num - 1)
+        # res block
+        for i, out_channel, n, theta1, theta2, stride in six.moves.zip(six.moves.range(1, block_num + 1), out_channels, N, Swapout.linear_schedule(Theta1[0], Theta1[1], N), Swapout.linear_schedule(Theta2[0], Theta2[1], N), strides):
+            modules.append(('res_block_with_swapout{}'.format(i), ResBlockWithSwapout(in_channel, out_channel, theta1, theta2, n=n, stride_at_first_layer=stride)))
             in_channel = out_channel
+        # prediction
         modules.append(('bn_relu_conv', BN_ReLU_Conv(in_channel, category_num, filter_size=(1, 1), stride=(1, 1), pad=(0, 0))))
-        modules.append(('bn', L.BatchNormalization(category_num)))
         # register layers
         [self.add_link(*link) for link in modules]
         self.modules = modules
@@ -147,10 +167,10 @@ class Swapout(nutszebra_chainer.Model):
     @test
     def __call__(self, x, train=False, train_dropout=True):
         h = self.conv1(x)
+        h = F.max_pooling_2d(h, ksize=(3, 3), stride=(2, 2), pad=(1, 1))
         for i in six.moves.range(1, self.block_num + 1):
             h = self['res_block_with_swapout{}'.format(i)](h, train=train, train_dropout=train_dropout)
-            h = F.max_pooling_2d(h, ksize=(3, 3), stride=(2, 2), pad=(1, 1))
-        h = F.relu(self.bn(self.bn_relu_conv(h, train=train), test=not train))
+        h = self.bn_relu_conv(h, train=train)
         num, categories, y, x = h.data.shape
         h = F.reshape(F.average_pooling_2d(h, (y, x)), (num, categories))
         return h
