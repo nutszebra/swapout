@@ -66,7 +66,7 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
 
     def maybe_pooling(self, x):
         if self.stride_at_first_layer == 2:
-            return F.average_pooling_2d(x, 3, 2, 1)
+            return F.average_pooling_2d(x, 1, 2, 0)
         return x
 
     @staticmethod
@@ -104,7 +104,7 @@ def test(func):
                 for i in six.moves.range(30):
                     y += F.softmax(func(self, x, **kwargs))
                 self.stochastic_inference = True
-                return y
+                return y / 30
             else:
                 # deterministic inference
                 kwargs['train_dropout'] = False
@@ -120,7 +120,7 @@ class Swapout(nutszebra_chainer.Model):
     def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(10, 10, 10), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True):
         super(Swapout, self).__init__()
         # conv
-        modules = [('conv1', L.Convolution2D(3, out_channels[0], 7, 2, 3))]
+        modules = [('conv1', L.Convolution2D(3, out_channels[0], 3, 1, 1))]
         in_channel = out_channels[0]
         strides = [1] + [2] * (block_num - 1)
         # res block
@@ -167,7 +167,6 @@ class Swapout(nutszebra_chainer.Model):
     @test
     def __call__(self, x, train=False, train_dropout=True):
         h = self.conv1(x)
-        h = F.max_pooling_2d(h, ksize=(3, 3), stride=(2, 2), pad=(1, 1))
         for i in six.moves.range(1, self.block_num + 1):
             h = self['res_block_with_swapout{}'.format(i)](h, train=train, train_dropout=train_dropout)
         h = self.bn_relu_conv(h, train=train)
