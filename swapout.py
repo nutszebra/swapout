@@ -30,7 +30,7 @@ class BN_ReLU_Conv(nutszebra_chainer.Model):
 
 class ResBlockWithSwapout(nutszebra_chainer.Model):
 
-    def __init__(self, in_channel, out_channel, theta1, theta2, n=38, stride_at_first_layer=2, multiplier=4):
+    def __init__(self, in_channel, out_channel, theta1, theta2, n=6, stride_at_first_layer=2, multiplier=4):
         super(ResBlockWithSwapout, self).__init__()
         modules = []
         modules += [('skip_bn', L.BatchNormalization(in_channel))]
@@ -125,7 +125,7 @@ def test(func):
 
 class Swapout(nutszebra_chainer.Model):
 
-    def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(10, 10, 10), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True, multiplier=4):
+    def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(6, 6, 6), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True, multiplier=4):
         super(Swapout, self).__init__()
         # conv
         modules = [('conv1', L.Convolution2D(3, out_channels[0], 3, 1, 1))]
