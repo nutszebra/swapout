@@ -30,14 +30,17 @@ class BN_ReLU_Conv(nutszebra_chainer.Model):
 
 class ResBlockWithSwapout(nutszebra_chainer.Model):
 
-    def __init__(self, in_channel, out_channel, theta1, theta2, n=38, stride_at_first_layer=2):
+    def __init__(self, in_channel, out_channel, theta1, theta2, n=38, stride_at_first_layer=2, multiplier=4):
         super(ResBlockWithSwapout, self).__init__()
         modules = []
-        modules += [('bn_relu_conv1_1', BN_ReLU_Conv(in_channel, out_channel, 3, stride_at_first_layer, 1))]
+        modules += [('skip_bn', L.BatchNormalization(in_channel))]
+        modules += [('bn_relu_conv1_1', BN_ReLU_Conv(in_channel, out_channel, 1, stride_at_first_layer, 0))]
         modules += [('bn_relu_conv2_1', BN_ReLU_Conv(out_channel, out_channel))]
+        modules += [('bn_relu_conv3_1', BN_ReLU_Conv(out_channel, int(multiplier * out_channel), 1, 1, 0))]
         for i in six.moves.range(2, n + 1):
-            modules.append(('bn_relu_conv1_{}'.format(i), BN_ReLU_Conv(out_channel, out_channel)))
+            modules.append(('bn_relu_conv1_{}'.format(i), BN_ReLU_Conv(int(multiplier * out_channel), out_channel, 1, 1, 0)))
             modules.append(('bn_relu_conv2_{}'.format(i), BN_ReLU_Conv(out_channel, out_channel)))
+            modules.append(('bn_relu_conv3_{}'.format(i), BN_ReLU_Conv(out_channel, int(multiplier * out_channel), 1, 1, 0)))
         # register layers
         [self.add_link(*link) for link in modules]
         self.modules = modules
@@ -47,11 +50,13 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
         self.theta1 = theta1
         self.theta2 = theta2
         self.stride_at_first_layer = stride_at_first_layer
+        self.multiplier = multiplier
 
     def weight_initialization(self):
         for i in six.moves.range(1, self.n + 1):
             self['bn_relu_conv1_{}'.format(i)].weight_initialization()
             self['bn_relu_conv2_{}'.format(i)].weight_initialization()
+            self['bn_relu_conv3_{}'.format(i)].weight_initialization()
 
     @staticmethod
     def concatenate_zero_pad(x, h_shape, volatile, h_type):
@@ -76,18 +81,21 @@ class ResBlockWithSwapout(nutszebra_chainer.Model):
     def __call__(self, x, train=False, train_dropout=True):
         h = self['bn_relu_conv1_1'](x, train=train)
         h = self['bn_relu_conv2_1'](h, train=train)
-        x = ResBlockWithSwapout._swapout(ResBlockWithSwapout.concatenate_zero_pad(self.maybe_pooling(x), h.data.shape, h.volatile, type(h.data)), h, self.theta1[0], self.theta2[0], train=train_dropout)
+        h = self['bn_relu_conv3_1'](h, train=train)
+        x = ResBlockWithSwapout._swapout(ResBlockWithSwapout.concatenate_zero_pad(self.maybe_pooling(F.relu(self.skip_bn(x, test=not train))), h.data.shape, h.volatile, type(h.data)), h, self.theta1[0], self.theta2[0], train=train_dropout)
         for i in six.moves.range(2, self.n + 1):
             h = self['bn_relu_conv1_{}'.format(i)](x, train=train)
             h = self['bn_relu_conv2_{}'.format(i)](h, train=train)
+            h = self['bn_relu_conv3_{}'.format(i)](h, train=train)
             x = ResBlockWithSwapout._swapout(x, h, self.theta1[i - 1], self.theta2[i - 1], train=train_dropout)
         return x
 
     def count_parameters(self):
         count = 0
         for i in six.moves.range(1, self.n + 1):
-            count = count + self['bn_relu_conv1_{}'.format(i)].count_parameters()
-            count = count + self['bn_relu_conv2_{}'.format(i)].count_parameters()
+            count += self['bn_relu_conv1_{}'.format(i)].count_parameters()
+            count += self['bn_relu_conv2_{}'.format(i)].count_parameters()
+            count += self['bn_relu_conv3_{}'.format(i)].count_parameters()
         return count
 
 
@@ -117,7 +125,7 @@ def test(func):
 
 class Swapout(nutszebra_chainer.Model):
 
-    def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(10, 10, 10), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True):
+    def __init__(self, category_num, block_num=3, out_channels=(16 * 4, 32 * 4, 64 * 4), N=(10, 10, 10), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True, multiplier=4):
         super(Swapout, self).__init__()
         # conv
         modules = [('conv1', L.Convolution2D(3, out_channels[0], 3, 1, 1))]
@@ -125,7 +133,7 @@ class Swapout(nutszebra_chainer.Model):
         strides = [1] + [2] * (block_num - 1)
         # res block
         for i, out_channel, n, theta1, theta2, stride in six.moves.zip(six.moves.range(1, block_num + 1), out_channels, N, Swapout.linear_schedule(Theta1[0], Theta1[1], N), Swapout.linear_schedule(Theta2[0], Theta2[1], N), strides):
-            modules.append(('res_block_with_swapout{}'.format(i), ResBlockWithSwapout(in_channel, out_channel, theta1, theta2, n=n, stride_at_first_layer=stride)))
+            modules.append(('res_block_with_swapout{}'.format(i), ResBlockWithSwapout(in_channel, out_channel, theta1, theta2, n=n, stride_at_first_layer=stride, multiplier=multiplier)))
             in_channel = out_channel
         # prediction
         modules.append(('bn_relu_conv', BN_ReLU_Conv(in_channel, category_num, filter_size=(1, 1), stride=(1, 1), pad=(0, 0))))
@@ -139,7 +147,8 @@ class Swapout(nutszebra_chainer.Model):
         self.Theta1 = Theta1
         self.Theta2 = Theta2
         self.stochastic_inference = stochastic_inference
-        self.name = 'swapout_{}_{}_{}_{}_{}_{}_{}'.format(category_num, block_num, out_channels, N, Theta1, Theta2, stochastic_inference)
+        self.multiplier = multiplier
+        self.name = 'swapout_{}_{}_{}_{}_{}_{}_{}_{}'.format(category_num, block_num, out_channels, N, Theta1, Theta2, stochastic_inference, multiplier)
 
     @staticmethod
     def linear_schedule(bottom_layer, top_layer, N):
@@ -178,7 +187,7 @@ class Swapout(nutszebra_chainer.Model):
         count = 0
         count += functools.reduce(lambda a, b: a * b, self.conv1.W.data.shape)
         for i in six.moves.range(1, self.block_num + 1):
-            count = count + self['res_block_with_swapout{}'.format(i)].count_parameters()
+            count += self['res_block_with_swapout{}'.format(i)].count_parameters()
         count += self.bn_relu_conv.count_parameters()
         return count
 
