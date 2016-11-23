@@ -134,7 +134,7 @@ class Swapout(nutszebra_chainer.Model):
         # res block
         for i, out_channel, n, theta1, theta2, stride in six.moves.zip(six.moves.range(1, block_num + 1), out_channels, N, Swapout.linear_schedule(Theta1[0], Theta1[1], N), Swapout.linear_schedule(Theta2[0], Theta2[1], N), strides):
             modules.append(('res_block_with_swapout{}'.format(i), ResBlockWithSwapout(in_channel, out_channel, theta1, theta2, n=n, stride_at_first_layer=stride, multiplier=multiplier)))
-            in_channel = out_channel
+            in_channel = int(out_channel * multiplier)
         # prediction
         modules.append(('bn_relu_conv', BN_ReLU_Conv(in_channel, category_num, filter_size=(1, 1), stride=(1, 1), pad=(0, 0))))
         # register layers
