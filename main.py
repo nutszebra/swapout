@@ -46,8 +46,8 @@ if __name__ == '__main__':
                         default=4,
                         help='width hyperparameter')
     parser.add_argument('--N', '-n', type=int,
-                        default=32,
-                        help='width hyperparameter')
+                        default=20,
+                        help='total layers')
 
     args = parser.parse_args().__dict__
     lr = args.pop('lr')
@@ -55,7 +55,7 @@ if __name__ == '__main__':
     N = args.pop('N')
 
     print('generating model')
-    model = swapout.Swapout(10, block_num=3, out_channels=(16 * k, 32 * k, 64 * k), N=(int(N / 3.), int(N / 3.), int(N / 3.)), Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True)
+    model = swapout.Swapout(10, block_num=3, out_channels=(16 * k, 32 * k, 64 * k), N=(int(N / 3. / 2.),) * 3, Theta1=(0.0, 0.5), Theta2=(0.0, 0.5), stochastic_inference=True)
     print('Done')
     optimizer = nutszebra_optimizer.OptimizerSwapout(model, lr=lr)
     args['model'] = model
