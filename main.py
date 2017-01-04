@@ -46,7 +46,7 @@ if __name__ == '__main__':
                         default=4,
                         help='width hyperparameter')
     parser.add_argument('--N', '-n', type=int,
-                        default=20,
+                        default=32,
                         help='total layers')
 
     args = parser.parse_args().__dict__
