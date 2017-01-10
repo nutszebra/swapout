@@ -24,7 +24,7 @@ Test: Pictures are resized to 32x32, then they are normalized locally. Single im
 |:-------------------------------|-------|----|-------------------:|
 | Swapout v2(20) Wx4[[1]][Paper] | 20    | 4  | 94.91              |
 | Swapout v2(32) Wx4[[1]][Paper] | 32    | 4  | 95.24              |
-| my implementation              | 20    | 4  | soon              |
+| my implementation              | 32    | 4  | 95.34              |
 
 <img src="https://github.com/nutszebra/swapout/blob/master/loss.jpg" alt="loss" title="loss">
 <img src="https://github.com/nutszebra/swapout/blob/master/accuracy.jpg" alt="total accuracy" title="total accuracy">
